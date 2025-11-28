@@ -1,8 +1,8 @@
 import os
 from typing import Dict, List
 from langchain_google_genai import ChatGoogleGenerativeAI
-# CRITICAL CHANGE: Import the correct Document type from the core package
-from langchain_core.documents import Document 
+# Imports synchronized with the stable 'langchain' package
+from langchain.schema import Document 
 from data_loader import get_vector_store # Imports the function that builds the in-memory DB
 
 class HRAgent:
@@ -11,12 +11,11 @@ class HRAgent:
         print("Initializing HRAgent...")
         
         # --- 1. Get Vector Store (Diskless) ---
-        # Calls data_loader.py to create the FAISS index in memory
         self.vector_store = get_vector_store() 
         
         if self.vector_store is None:
-            # 🚨 CRITICAL ERROR MESSAGE: Explicitly naming the folder and API key secret
-            raise Exception("Failed to load vector store. Check documents in the 'HR_Policy_Docs' folder and ensure GEMINI_API_KEY is set as a Streamlit Secret.")
+            # 🚨 FINAL EXPLICIT ERROR MESSAGE for runtime failure
+            raise Exception("Failed to load vector store. Final Check: 1. Documents in 'HR_Policy_Docs' 2. GEMINI_API_KEY secret set in Streamlit.")
         
         # --- 2. Initialize Gemini LLM ---
         self.llm = ChatGoogleGenerativeAI(
@@ -25,7 +24,6 @@ class HRAgent:
         )
         
         # --- 3. Create Retriever ---
-        # The .as_retriever() method is powered by the langchain-retrievers package
         self.retriever = self.vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": 5}

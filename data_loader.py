@@ -1,16 +1,14 @@
 import os
 from typing import List
-from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-# CRITICAL CHANGE 1: Import from the new, dedicated package
-from langchain_text_splitters import RecursiveCharacterTextSplitter 
-# CRITICAL CHANGE 2: Import FAISS and remove old Chroma import
-from langchain_community.vectorstores import FAISS 
+# Imports synchronized with the stable 'langchain' package
+from langchain.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter 
+from langchain.vectorstores import FAISS 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-# CRITICAL CHANGE 3: Import Document from the new core
-from langchain_core.documents import Document 
+from langchain.schema import Document # Use langchain.schema for Document
 
 # --- Configuration ---
-# *** DEFINITIVE FOLDER NAME CHECK: MUST MATCH GITHUB ***
+# *** CRITICAL: MUST MATCH THE FOLDER NAME IN YOUR GITHUB REPO (case-sensitive) ***
 DATA_DIR = "HR_Policy_Docs" 
 CHUNKING_CONFIG = {
     "chunk_size": 1000,
@@ -23,9 +21,8 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
     documents = []
     print(f"Loading documents from directory: {directory}")
     
-    # Handle the case where the policies directory might not exist
+    # 🚨 CRITICAL CHECK: Ensure the directory exists
     if not os.path.exists(directory):
-        # Explicit error message if directory is missing
         print(f"ERROR: Document directory '{directory}' not found. Check Git structure.")
         return documents
 
@@ -46,7 +43,6 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
             try:
                 documents.extend(loader.load())
             except Exception as e:
-                # Explicit error message if a file fails to load
                 print(f"ERROR: Failed to load document {filename}: {e}")
                 
     return documents
@@ -60,29 +56,25 @@ def get_vector_store():
     # 1. Load Documents
     raw_documents = load_all_documents()
     if not raw_documents:
-        # Check 1: Documents not found/loaded
         print("CRITICAL FAILURE: No raw documents were loaded. Returning None.")
         return None
 
     # 2. Split Documents
-    # Uses the chunking configuration defined above
     text_splitter = RecursiveCharacterTextSplitter(**CHUNKING_CONFIG)
     chunked_documents = text_splitter.split_documents(raw_documents)
     print(f"Total documents loaded: {len(raw_documents)}. Total chunks created: {len(chunked_documents)}")
 
-    # 3. Initialize Embeddings (This is where the API key is first used)
+    # 3. Initialize Embeddings (This is where the API key is used)
     try:
         embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
         # Force a small operation to check API key validity early
-        _ = embeddings.embed_query("test query")
+        _ = embeddings.embed_query("check") 
     except Exception as e:
         # Check 2: API key failure during embedding initialization
         print(f"CRITICAL FAILURE: Embeddings model failed to initialize. Check Streamlit Secret 'GEMINI_API_KEY'. Error: {e}")
         return None
 
     # 4. Create In-Memory Vector Store using FAISS
-    # This creates the vector store entirely in the server's memory, 
-    # avoiding disk access issues (File I/O) and compilation errors (FAISS is stable).
     vector_store = FAISS.from_documents(
         documents=chunked_documents, 
         embedding=embeddings
