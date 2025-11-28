@@ -1,4 +1,3 @@
-# app.py
 import streamlit as st
 from hr_agent import HRAgent
 from typing import List
@@ -29,8 +28,11 @@ def contains_high_risk_keywords(text: str) -> bool:
     """Check if the text contains any high-risk keywords"""
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in HIGH_RISK_KEYWORDS)
+
+# Use st.cache_resource to initialize the heavy HR Agent only once
 @st.cache_resource
 def get_hr_agent():
+    # This is where the HRAgent (and thus data_loader.py) is called
     return HRAgent()
 
 def main():
@@ -65,8 +67,9 @@ def main():
             response = ESCALATION_MESSAGE
             sources = []
         else:
-            # Get response from HR Agent
+            # Get response from HR Agent (triggers the one-time initialization)
             with st.spinner("Thinking..."):
+                # If get_hr_agent fails here, it throws the initialization error
                 hr_agent = get_hr_agent()
                 result = hr_agent.get_response(prompt)
                 response = result["answer"]

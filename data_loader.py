@@ -10,7 +10,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document 
 
 # --- Configuration ---
-DATA_DIR = "HR_Policy_Docs" # Assuming your policy files are in the 'policies' subfolder
+# *** DEFINITIVE FOLDER NAME CHECK: MUST MATCH GITHUB ***
+DATA_DIR = "HR_Policy_Docs" 
 CHUNKING_CONFIG = {
     "chunk_size": 1000,
     "chunk_overlap": 200
@@ -24,7 +25,8 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
     
     # Handle the case where the policies directory might not exist
     if not os.path.exists(directory):
-        print(f"Error: Directory '{directory}' not found.")
+        # Explicit error message if directory is missing
+        print(f"ERROR: Document directory '{directory}' not found. Check Git structure.")
         return documents
 
     for filename in os.listdir(directory):
@@ -44,7 +46,8 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
             try:
                 documents.extend(loader.load())
             except Exception as e:
-                print(f"Error loading {filename}: {e}")
+                # Explicit error message if a file fails to load
+                print(f"ERROR: Failed to load document {filename}: {e}")
                 
     return documents
 
@@ -57,7 +60,8 @@ def get_vector_store():
     # 1. Load Documents
     raw_documents = load_all_documents()
     if not raw_documents:
-        print("WARNING: No documents were loaded. Vector store will be empty.")
+        # Check 1: Documents not found/loaded
+        print("CRITICAL FAILURE: No raw documents were loaded. Returning None.")
         return None
 
     # 2. Split Documents
@@ -66,8 +70,15 @@ def get_vector_store():
     chunked_documents = text_splitter.split_documents(raw_documents)
     print(f"Total documents loaded: {len(raw_documents)}. Total chunks created: {len(chunked_documents)}")
 
-    # 3. Initialize Embeddings
-    embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
+    # 3. Initialize Embeddings (This is where the API key is first used)
+    try:
+        embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
+        # Force a small operation to check API key validity early
+        _ = embeddings.embed_query("test query")
+    except Exception as e:
+        # Check 2: API key failure during embedding initialization
+        print(f"CRITICAL FAILURE: Embeddings model failed to initialize. Check Streamlit Secret 'GEMINI_API_KEY'. Error: {e}")
+        return None
 
     # 4. Create In-Memory Vector Store using FAISS
     # This creates the vector store entirely in the server's memory, 

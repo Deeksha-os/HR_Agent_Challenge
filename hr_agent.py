@@ -6,7 +6,6 @@ from langchain_core.documents import Document
 from data_loader import get_vector_store # Imports the function that builds the in-memory DB
 
 class HRAgent:
-    # Constructor no longer accepts 'db_path' as it's diskless
     def __init__(self):
         """Initialize the HR Agent with an in-memory FAISS vector store and Gemini model"""
         print("Initializing HRAgent...")
@@ -16,8 +15,8 @@ class HRAgent:
         self.vector_store = get_vector_store() 
         
         if self.vector_store is None:
-            # Note: Assuming 'policies' is the correct folder name for the documents
-            raise Exception("Failed to load vector store. Check documents in the 'policies' folder and dependencies.")
+            # 🚨 CRITICAL ERROR MESSAGE: Explicitly naming the folder and API key secret
+            raise Exception("Failed to load vector store. Check documents in the 'HR_Policy_Docs' folder and ensure GEMINI_API_KEY is set as a Streamlit Secret.")
         
         # --- 2. Initialize Gemini LLM ---
         self.llm = ChatGoogleGenerativeAI(
@@ -88,4 +87,4 @@ if __name__ == '__main__':
         
     except Exception as init_error:
         print(f"Error during HRAgent initialization: {init_error}")
-        print("Please ensure your 'policies/' directory exists and contains documents.")
+        print("Please ensure your 'HR_Policy_Docs' directory exists and contains documents.")
