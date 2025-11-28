@@ -10,7 +10,7 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_core.documents import Document 
 
 # --- Configuration ---
-DATA_DIR = "policies" # Assuming your policy files are in the 'policies' subfolder
+DATA_DIR = "HR_Policy_Docs" # Assuming your policy files are in the 'policies' subfolder
 CHUNKING_CONFIG = {
     "chunk_size": 1000,
     "chunk_overlap": 200
