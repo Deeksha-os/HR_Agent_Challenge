@@ -1,15 +1,16 @@
 import os
-from typing import List, Union
-# We use community loaders and Chroma because they are wrappers for the underlying libraries
+from typing import List
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-# CRITICAL FIX: Using Google's embeddings for speed
+# CRITICAL CHANGE 1: Import from the new, dedicated package
+from langchain_text_splitters import RecursiveCharacterTextSplitter 
+# CRITICAL CHANGE 2: Import FAISS and remove old Chroma import
+from langchain_community.vectorstores import FAISS 
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.schema import Document
+# CRITICAL CHANGE 3: Import Document from the new core
+from langchain_core.documents import Document 
 
 # --- Configuration ---
-DATA_DIR = "policies" # Assumes your policy files are in a 'policies' subfolder
+DATA_DIR = "policies" # Assuming your policy files are in the 'policies' subfolder
 CHUNKING_CONFIG = {
     "chunk_size": 1000,
     "chunk_overlap": 200
@@ -49,10 +50,9 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
 
 def get_vector_store():
     """
-    Creates an in-memory Chroma vector store from the policy documents.
-    This function avoids the file permission issue by not using 'persist_directory'.
+    Creates an in-memory FAISS vector store from the policy documents.
     """
-    print("Starting vector store creation in memory...")
+    print("Starting FAISS vector store creation in memory...")
     
     # 1. Load Documents
     raw_documents = load_all_documents()
@@ -61,6 +61,7 @@ def get_vector_store():
         return None
 
     # 2. Split Documents
+    # Uses the chunking configuration defined above
     text_splitter = RecursiveCharacterTextSplitter(**CHUNKING_CONFIG)
     chunked_documents = text_splitter.split_documents(raw_documents)
     print(f"Total documents loaded: {len(raw_documents)}. Total chunks created: {len(chunked_documents)}")
@@ -68,9 +69,10 @@ def get_vector_store():
     # 3. Initialize Embeddings
     embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
 
-    # 4. Create In-Memory Vector Store
-    # This vector store is purely held in memory and avoids all file permission issues.
-    vector_store = Chroma.from_documents(
+    # 4. Create In-Memory Vector Store using FAISS
+    # This creates the vector store entirely in the server's memory, 
+    # avoiding disk access issues (File I/O) and compilation errors (FAISS is stable).
+    vector_store = FAISS.from_documents(
         documents=chunked_documents, 
         embedding=embeddings
     )

@@ -1,29 +1,32 @@
 import os
 from typing import Dict, List
 from langchain_google_genai import ChatGoogleGenerativeAI
+# CRITICAL CHANGE: Import the correct Document type from the core package
+from langchain_core.documents import Document 
 from data_loader import get_vector_store # Imports the function that builds the in-memory DB
 
 class HRAgent:
     # Constructor no longer accepts 'db_path' as it's diskless
     def __init__(self):
-        """Initialize the HR Agent with an in-memory ChromaDB and Gemini model"""
+        """Initialize the HR Agent with an in-memory FAISS vector store and Gemini model"""
         print("Initializing HRAgent...")
         
-        # --- 1. Get Vector Store (The main fix) ---
-        # This calls the function in data_loader.py to create the in-memory DB.
+        # --- 1. Get Vector Store (Diskless) ---
+        # Calls data_loader.py to create the FAISS index in memory
         self.vector_store = get_vector_store() 
         
         if self.vector_store is None:
+            # Note: Assuming 'policies' is the correct folder name for the documents
             raise Exception("Failed to load vector store. Check documents in the 'policies' folder and dependencies.")
         
         # --- 2. Initialize Gemini LLM ---
-        # The API key is read automatically from the environment (Streamlit secrets)
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             temperature=0.3
         )
         
         # --- 3. Create Retriever ---
+        # The .as_retriever() method is powered by the langchain-retrievers package
         self.retriever = self.vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": 5}
