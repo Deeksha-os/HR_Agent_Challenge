@@ -1,48 +1,29 @@
 import os
-import warnings
 from typing import Dict, List
-
-# LangChain Imports
-from langchain_community.vectorstores import Chroma
-# CORRECTED: Import Google Generative AI components for hosted services
-from langchain_google_genai import ChatGoogleGenerativeAI, GoogleGenerativeAIEmbeddings 
-
-# Suppress the specific LangChain deprecation warning
-warnings.filterwarnings(
-    "ignore", 
-    message="The class `langchain.embeddings.huggingface.HuggingFaceEmbeddings` is deprecated."
-)
+from langchain_google_genai import ChatGoogleGenerativeAI
+from data_loader import get_vector_store # Imports the function that builds the in-memory DB
 
 class HRAgent:
-    def __init__(self, db_path: str = "chroma_db"):
-        """Initialize the HR Agent with ChromaDB and Gemini model"""
+    # Constructor no longer accepts 'db_path' as it's diskless
+    def __init__(self):
+        """Initialize the HR Agent with an in-memory ChromaDB and Gemini model"""
         print("Initializing HRAgent...")
         
-        # --- 1. Initialize Embeddings (SPEED FIX) ---
-        # Uses the hosted Google service (embedding-001) which is fast and requires no local download.
-        self.embeddings = GoogleGenerativeAIEmbeddings(
-            model="embedding-001" 
-        )
+        # --- 1. Get Vector Store (The main fix) ---
+        # This calls the function in data_loader.py to create the in-memory DB.
+        self.vector_store = get_vector_store() 
         
-        # --- 2. Initialize ChromaDB Vector Store (FILE PERMISSION FIX) ---
-        # Added collection_metadata={"allow_reset": True} to prevent the "unable to open database file" 
-        # error caused by Streamlit Cloud's read-only file system.
-        self.vector_store = Chroma(
-            persist_directory=db_path,
-            embedding_function=self.embeddings,
-            # CRITICAL FIX: Allows Chroma to load the existing DB on the read-only server.
-            collection_metadata={"allow_reset": True} 
-        )
+        if self.vector_store is None:
+            raise Exception("Failed to load vector store. Check documents in the 'policies' folder and dependencies.")
         
-        # --- 3. Initialize Gemini LLM ---
-        # The API key is automatically read by the LangChain integration from Streamlit's secrets.
+        # --- 2. Initialize Gemini LLM ---
+        # The API key is read automatically from the environment (Streamlit secrets)
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             temperature=0.3
         )
         
-        # --- 4. Create Retriever ---
-        # The retriever fetches the most relevant document chunks based on the query.
+        # --- 3. Create Retriever ---
         self.retriever = self.vector_store.as_retriever(
             search_type="similarity",
             search_kwargs={"k": 5}
@@ -84,9 +65,9 @@ class HRAgent:
             }
             
         except Exception as e:
-            # Provide a clear, non-technical message to the user if the RAG process fails
+            # Fallback error for any issue during retrieval or generation
             return {
-                "answer": "I apologize, but an unexpected error occurred while processing your request. Please ensure the required policy documents are accessible and your API key is valid, then try again.",
+                "answer": f"A critical error occurred during processing: {str(e)}. This is likely a configuration or API issue.",
                 "sources": []
             }
 
@@ -96,7 +77,6 @@ if __name__ == '__main__':
         agent = HRAgent()
         print("HRAgent initialized successfully.")
         
-        # Test a query
         test_query = "What is the policy for using sick leave?"
         print(f"\nTesting Query: {test_query}")
         result = agent.get_response(test_query)
@@ -105,4 +85,4 @@ if __name__ == '__main__':
         
     except Exception as init_error:
         print(f"Error during HRAgent initialization: {init_error}")
-        print("Please ensure your API key is correct and the chroma_db files are present.")
+        print("Please ensure your 'policies/' directory exists and contains documents.")
