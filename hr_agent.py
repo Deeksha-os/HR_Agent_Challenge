@@ -8,7 +8,11 @@ from langchain_community.vectorstores import Chroma
 from langchain_community.embeddings import HuggingFaceEmbeddings
 # We are using the Google GenAI LLM wrapper
 from langchain_google_genai import ChatGoogleGenerativeAI 
-
+# The indexing script MUST now use this:
+from langchain_google_genai import GoogleGenerativeAIEmbeddings
+...
+# Inside the script, the embeddings initialization must look like this:
+embeddings = GoogleGenerativeAIEmbeddings(model="embedding-001")
 # Suppress LangChain deprecation warning for embeddings
 warnings.filterwarnings(
     "ignore", 
