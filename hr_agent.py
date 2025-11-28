@@ -1,88 +1,90 @@
 import os
-from typing import Dict, List
 from langchain_google_genai import ChatGoogleGenerativeAI
-# Imports synchronized with the stable 'langchain' package
-from langchain.schema import Document 
-from data_loader import get_vector_store # Imports the function that builds the in-memory DB
+from langchain_core.documents import Document # Use langchain_core for Document import
+from langchain.chains import ConversationalRetrievalChain
+from langchain.memory import ConversationBufferMemory
+from data_loader import get_vector_store 
 
 class HRAgent:
+    """
+    An HR Agent that answers questions based on a vector store of HR documents.
+    """
     def __init__(self):
-        """Initialize the HR Agent with an in-memory Chroma vector store and Gemini model"""
-        print("Initializing HRAgent...")
+        # 1. Initialize the vector store and retriever
+        self.vector_store = get_vector_store()
         
-        # --- 1. Get Vector Store (Diskless) ---
-        self.vector_store = get_vector_store() 
+        if not self.vector_store:
+            # Propagate the error if the vector store failed to load/create
+            raise ValueError("Vector store failed to initialize. Check data_loader.py logs.")
+            
+        self.retriever = self.vector_store.as_retriever()
         
-        if self.vector_store is None:
-            # 🚨 FINAL EXPLICIT ERROR MESSAGE for runtime failure
-            raise Exception("Failed to load vector store. Final Check: 1. Documents in 'HR_Policy_Docs' 2. GEMINI_API_KEY secret set in Streamlit.")
-        
-        # --- 2. Initialize Gemini LLM ---
+        # 2. Initialize the Chat Model (Gemini)
+        if not os.environ.get("GEMINI_API_KEY"):
+             raise ValueError("GEMINI_API_KEY environment variable not set.")
+
+        # Using the specified model for chat
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash", 
             temperature=0.3
         )
-        
-        # --- 3. Create Retriever ---
-        self.retriever = self.vector_store.as_retriever(
-            search_type="similarity",
-            search_kwargs={"k": 5}
+
+        # 3. Initialize Conversation Memory
+        self.memory = ConversationBufferMemory(
+            memory_key="chat_history", 
+            return_messages=True
         )
-        print("HRAgent initialized successfully.")
-    
-    def get_response(self, query: str) -> Dict[str, any]:
+
+        # 4. Create the Conversational Retrieval Chain
+        # This chain manages the RAG flow: retrieve documents, then generate response
+        self.chain = ConversationalRetrievalChain.from_llm(
+            llm=self.llm,
+            retriever=self.retriever,
+            memory=self.memory,
+            # Set system instruction to guide the HR agent's behavior
+            combine_docs_chain_kwargs={
+                "prompt": """
+                You are a highly professional and friendly HR Assistant. 
+                Use the provided context documents to answer the user's questions about HR policies.
+                
+                If the answer is not contained in the context, clearly state that 
+                you cannot provide an answer based on the available HR documents. 
+                Do not make up information.
+                
+                Always cite your sources by mentioning the document's source (e.g., 'Source: [metadata.source]').
+                
+                Context: {context}
+                
+                Question: {question}
+                
+                Answer:
+                """
+            }
+        )
+
+    def ask(self, query: str) -> str:
         """
-        Get response for the given query using the RAG pipeline.
+        Processes a user query and returns the agent's response.
         """
         try:
-            # --- 1. Retrieval Step ---
-            docs = self.retriever.invoke(query)
-            
-            # --- 2. Context Formatting ---
-            context = "\n\n".join([doc.page_content for doc in docs])
-            
-            # Extract unique source filenames for citation
-            sources = list(set([os.path.basename(doc.metadata.get('source', 'Unknown')) for doc in docs]))
-            
-            # --- 3. Prompt Construction ---
-            prompt = f"""You are a highly detailed, professional, and helpful HR assistant. Your goal is to provide comprehensive and friendly answers to employee questions. 
-            Use ONLY the following context to answer the question at the end. Structure your response clearly with bullet points or paragraphs.
-            If the context does not contain the answer, politely state that you could not find the specific information in the current policy documents, and suggest they contact HR for clarification.
-
-            Context:
-            {context}
-
-            Question: {query}
-
-            Answer:"""
-            
-            # --- 4. Generation Step ---
-            response = self.llm.invoke(prompt)
-            
-            return {
-                "answer": response.content,
-                "sources": sources
-            }
-            
+            # Invoke the chain to get the answer
+            result = self.chain.invoke({"question": query})
+            return result.get("answer", "I couldn't process that question. Please try again.")
         except Exception as e:
-            # Fallback error for any issue during retrieval or generation
-            return {
-                "answer": f"A critical error occurred during processing: {str(e)}. This is likely a configuration or API issue.",
-                "sources": []
-            }
+            return f"An error occurred while processing your request: {e}"
 
-if __name__ == '__main__':
-    print("Attempting to initialize HRAgent...")
+# Example usage (for testing or if the app needs to directly instantiate)
+if __name__ == "__main__":
+    # Note: This block assumes a valid GEMINI_API_KEY is set in the environment
+    # and a 'hr_documents' folder exists.
     try:
         agent = HRAgent()
-        print("HRAgent initialized successfully.")
+        print("HR Agent initialized. Ready to chat.")
         
-        test_query = "What is the policy for using sick leave?"
-        print(f"\nTesting Query: {test_query}")
-        result = agent.get_response(test_query)
-        print(f"Test Answer: {result['answer']}")
-        print(f"Test Sources: {result['sources']}")
+        response = agent.ask("What is the policy on sick leave?")
+        print(f"Agent Response: {response}")
         
-    except Exception as init_error:
-        print(f"Error during HRAgent initialization: {init_error}")
-        print("Please ensure your 'HR_Policy_Docs' directory exists and contains documents.")
+    except ValueError as e:
+        print(f"Initialization Failed: {e}")
+    except Exception as e:
+        print(f"Runtime Error: {e}")

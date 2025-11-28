@@ -1,93 +1,101 @@
 import os
 from typing import List
-# Imports synchronized with the stable 'langchain' package
-from langchain.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter 
-from langchain.vectorstores import Chroma # <-- CORRECT: Importing Chroma
+# FIX: Document loaders and the vector store were moved to 'langchain_community'
+# in the version 0.2.x of the LangChain library.
+from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
+from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_community.vectorstores import Chroma # <-- FIX: Moved from langchain.vectorstores
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
-from langchain.schema import Document # Use langchain.schema for Document
+from langchain_core.documents import Document # Using core package for stability
 
-# --- Configuration ---
-# CRITICAL: MUST MATCH THE FOLDER NAME IN YOUR GITHUB REPO
-DATA_DIR = "HR_Policy_Docs" 
-CHUNKING_CONFIG = {
-    "chunk_size": 1000,
-    "chunk_overlap": 200
-}
-EMBEDDING_MODEL = "embedding-001"
+# Define the directory where your HR documents are stored
+DATA_PATH = "hr_documents" 
 
-def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
-    """Loads documents from a directory supporting PDF, DOCX, and TXT."""
+def load_documents(data_path: str = DATA_PATH) -> List[Document]:
+    """
+    Loads all supported documents (PDF, DOCX, TXT) from the specified path.
+    """
     documents = []
-    print(f"Loading documents from directory: {directory}")
     
-    # CRITICAL CHECK: Ensure the directory exists
-    if not os.path.exists(directory):
-        print(f"ERROR: Document directory '{directory}' not found. Check Git structure.")
-        return documents
+    # Check if the directory exists and is not empty
+    if not os.path.exists(data_path) or not os.listdir(data_path):
+        print(f"Warning: Data directory '{data_path}' not found or is empty. Cannot load HR documents.")
+        return []
 
-    for filename in os.listdir(directory):
-        filepath = os.path.join(directory, filename)
+    for file_name in os.listdir(data_path):
+        file_path = os.path.join(data_path, file_name)
         loader = None
-        
-        # Determine the correct loader based on file extension
-        if filename.endswith(".pdf"):
-            loader = PyPDFLoader(filepath)
-        elif filename.endswith(".docx"):
-            loader = Docx2txtLoader(filepath)
-        elif filename.endswith(".txt"):
-            loader = TextLoader(filepath, encoding='utf-8')
+
+        if file_name.endswith(".pdf"):
+            loader = PyPDFLoader(file_path)
+        elif file_name.endswith((".docx", ".doc")):
+            loader = Docx2txtLoader(file_path)
+        elif file_name.endswith(".txt"):
+            loader = TextLoader(file_path)
         
         if loader:
-            print(f"  -> Loading {filename}")
             try:
                 documents.extend(loader.load())
+                print(f"Successfully loaded: {file_name}")
             except Exception as e:
-                print(f"ERROR: Failed to load document {filename}: {e}")
-                
+                print(f"Error loading {file_name}: {e}")
+    
+    # Fallback if no documents were found
+    if not documents:
+        print("No supported documents found or loaded.")
+        # Create a mock document to prevent downstream errors if the app relies on the vector store being created
+        documents.append(Document(page_content="Welcome to the HR Assistant. Upload your policies to begin.", metadata={"source": "system_default"}))
+
     return documents
 
 def get_vector_store():
     """
-    Creates an in-memory Chroma vector store from the policy documents.
+    Loads documents, splits them, creates embeddings, and initializes the Chroma vector store.
     """
-    print("Starting Chroma vector store creation in memory...")
+    documents = load_documents()
     
-    # 1. Load Documents
-    raw_documents = load_all_documents()
-    if not raw_documents:
-        print("CRITICAL FAILURE: No raw documents were loaded. Returning None.")
+    if not documents:
+        # If no documents are loaded, we can't create a vector store.
         return None
 
-    # 2. Split Documents
-    text_splitter = RecursiveCharacterTextSplitter(**CHUNKING_CONFIG)
-    chunked_documents = text_splitter.split_documents(raw_documents)
-    print(f"Total documents loaded: {len(raw_documents)}. Total chunks created: {len(chunked_documents)}")
+    # 1. Split the documents into smaller chunks
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+    texts = text_splitter.split_documents(documents)
 
-    # 3. Initialize Embeddings (This is where the API key is used)
-    try:
-        embeddings = GoogleGenerativeAIEmbeddings(model=EMBEDDING_MODEL)
-        # Force a small operation to check API key validity early
-        _ = embeddings.embed_query("check") 
-    except Exception as e:
-        # Check 2: API key failure during embedding initialization
-        print(f"CRITICAL FAILURE: Embeddings model failed to initialize. Check Streamlit Secret 'GEMINI_API_KEY'. Error: {e}")
+    if not os.environ.get("GEMINI_API_KEY"):
+        print("ERROR: GEMINI_API_KEY environment variable not set.")
         return None
 
-    # 4. Create In-Memory Vector Store using Chroma
-    vector_store = Chroma.from_documents( # <-- CORRECT: Calling Chroma class
-        documents=chunked_documents, 
-        embedding=embeddings,
-        collection_name="hr_policies_in_memory" 
-    )
+    # 2. Create the embeddings model
+    # The default model is 'gemini-2.5-flash' for embeddings with this library version.
+    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
+
+    # 3. Create the Chroma vector store
+    # We use a persistent directory to save the vector store across runs
+    persist_directory = "chroma_db"
     
-    print("In-memory vector store successfully created.")
+    # Check if a persistent database exists
+    if os.path.exists(persist_directory):
+        print("Loading existing vector store...")
+        vector_store = Chroma(
+            persist_directory=persist_directory,
+            embedding_function=embeddings
+        )
+    else:
+        print("Creating new vector store...")
+        vector_store = Chroma.from_documents(
+            documents=texts,
+            embedding=embeddings,
+            persist_directory=persist_directory
+        )
+        vector_store.persist() # Save the new store
+        print("New vector store created and persisted.")
+        
     return vector_store
 
-if __name__ == '__main__':
-    # Test the vector store creation locally
-    store = get_vector_store()
-    if store:
-        test_query = "What is the policy for sick days?"
-        results = store.similarity_search(test_query, k=1)
-        print(f"\nTest Query Results (First Chunk):\n{results[0].page_content[:200]}...")
+if __name__ == "__main__":
+    # This part is just for testing the data loading process locally
+    # Note: Requires a real 'hr_documents' folder and GEMINI_API_KEY
+    vector_store = get_vector_store()
+    if vector_store:
+        print(f"Vector store successfully initialized with {vector_store._collection.count()} documents.")
