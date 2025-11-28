@@ -29,7 +29,7 @@ def contains_high_risk_keywords(text: str) -> bool:
     """Check if the text contains any high-risk keywords"""
     text_lower = text.lower()
     return any(keyword in text_lower for keyword in HIGH_RISK_KEYWORDS)
-
+@st.cache_resource
 def get_hr_agent():
     return HRAgent()
 
