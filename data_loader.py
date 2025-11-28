@@ -3,12 +3,12 @@ from typing import List
 # Imports synchronized with the stable 'langchain' package
 from langchain.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter 
-from langchain.vectorstores import FAISS 
+from langchain.vectorstores import Chroma # <-- CORRECT: Importing Chroma
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain.schema import Document # Use langchain.schema for Document
 
 # --- Configuration ---
-# *** CRITICAL: MUST MATCH THE FOLDER NAME IN YOUR GITHUB REPO (case-sensitive) ***
+# CRITICAL: MUST MATCH THE FOLDER NAME IN YOUR GITHUB REPO
 DATA_DIR = "HR_Policy_Docs" 
 CHUNKING_CONFIG = {
     "chunk_size": 1000,
@@ -21,7 +21,7 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
     documents = []
     print(f"Loading documents from directory: {directory}")
     
-    # 🚨 CRITICAL CHECK: Ensure the directory exists
+    # CRITICAL CHECK: Ensure the directory exists
     if not os.path.exists(directory):
         print(f"ERROR: Document directory '{directory}' not found. Check Git structure.")
         return documents
@@ -49,9 +49,9 @@ def load_all_documents(directory: str = DATA_DIR) -> List[Document]:
 
 def get_vector_store():
     """
-    Creates an in-memory FAISS vector store from the policy documents.
+    Creates an in-memory Chroma vector store from the policy documents.
     """
-    print("Starting FAISS vector store creation in memory...")
+    print("Starting Chroma vector store creation in memory...")
     
     # 1. Load Documents
     raw_documents = load_all_documents()
@@ -74,10 +74,11 @@ def get_vector_store():
         print(f"CRITICAL FAILURE: Embeddings model failed to initialize. Check Streamlit Secret 'GEMINI_API_KEY'. Error: {e}")
         return None
 
-    # 4. Create In-Memory Vector Store using FAISS
-    vector_store = FAISS.from_documents(
+    # 4. Create In-Memory Vector Store using Chroma
+    vector_store = Chroma.from_documents( # <-- CORRECT: Calling Chroma class
         documents=chunked_documents, 
-        embedding=embeddings
+        embedding=embeddings,
+        collection_name="hr_policies_in_memory" 
     )
     
     print("In-memory vector store successfully created.")

@@ -7,7 +7,7 @@ from data_loader import get_vector_store # Imports the function that builds the 
 
 class HRAgent:
     def __init__(self):
-        """Initialize the HR Agent with an in-memory FAISS vector store and Gemini model"""
+        """Initialize the HR Agent with an in-memory Chroma vector store and Gemini model"""
         print("Initializing HRAgent...")
         
         # --- 1. Get Vector Store (Diskless) ---
