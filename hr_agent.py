@@ -15,13 +15,10 @@ class HRAgent:
         try:
             gemini_api_key_value = st.secrets["GEMINI_API_KEY"]
             
-            # CRITICAL FIX: The error indicates LangChain is specifically looking for GOOGLE_API_KEY 
-            # in the environment. We must set the value from our GEMINI_API_KEY secret 
-            # into the GOOGLE_API_KEY environment variable.
+            # CRITICAL FIX: Set the value into the GOOGLE_API_KEY environment variable.
             os.environ["GOOGLE_API_KEY"] = gemini_api_key_value
             
         except KeyError:
-            # Raise an error to be caught by the app.py error handler
             raise ValueError("GEMINI_API_KEY not found in Streamlit secrets for LLM initialization.")
 
         # 1. Load vector store (ChromaDB)
@@ -40,12 +37,9 @@ class HRAgent:
         )
 
         # 2. Chat Model Initialization
-        # Since we set the environment variable, the initialization should now succeed.
-        # We can omit the api_key parameter here as the environment variable is set.
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.3,
-            # We rely on the os.environ setting above, but passing explicitly is still good practice:
             api_key=gemini_api_key_value
         )
 
@@ -56,12 +50,15 @@ class HRAgent:
         )
 
         # 4. Retrieval-augmented chain setup
+        # --- FIX APPLIED HERE ---
         self.chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.retriever,
             memory=self.memory,
-            return_source_documents=True 
+            return_source_documents=True,
+            output_key='answer' # <--- THIS TELLS THE MEMORY WHICH KEY TO SAVE
         )
+        # -------------------------
 
     def get_response(self, query: str):
         """
@@ -69,6 +66,7 @@ class HRAgent:
         """
         try:
             result = self.chain.invoke({"question": query})
+            # Ensure we are extracting the key used in the chain's output
             answer = result.get("answer", "I couldn't find an answer in the policy documents.")
             
             sources = []
