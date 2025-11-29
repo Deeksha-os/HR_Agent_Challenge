@@ -4,10 +4,8 @@ from dotenv import load_dotenv
 
 # --- LangChain/RAG Imports ---
 from langchain_google_genai import ChatGoogleGenerativeAI
-from langchain.chains import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
+from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import Chroma
-# We will use TextLoader, but manually iterate over files instead of using DirectoryLoader for robustness
 from langchain_community.document_loaders import TextLoader 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -16,7 +14,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 load_dotenv() 
 
 # CRITICAL CONSTANT: Renamed persistence directory to force a clean data rebuild
-PERSIST_DIR = "chroma_db_final_txt_loader_v8" 
+PERSIST_DIR = "chroma_db_manual_rag_v10" 
 POLICY_DIR = 'HR_Policy_Docs'
 
 # --- Data Loading and Vector Store Logic (Integrated) ---
@@ -32,7 +30,6 @@ def build_vector_store():
         st.error(f"Configuration Error: Directory not found: {POLICY_DIR}")
         return None
     
-    # 1. Manually identify and load documents one by one
     policy_files = [
         os.path.join(POLICY_DIR, f) 
         for f in os.listdir(POLICY_DIR) 
@@ -45,16 +42,13 @@ def build_vector_store():
         
     documents = []
     
-    # Load each file explicitly
     for file_path in policy_files:
         try:
             # Use TextLoader directly on the file path with explicit encoding
             loader = TextLoader(file_path, encoding='utf-8')
             documents.extend(loader.load())
         except Exception as e:
-            # Report the error for the specific file that failed
             st.error(f"CRITICAL DOCUMENT ERROR: Failed to load {file_path}. Details: {e}")
-            # Continue trying to load other files, but log the error
             
     if not documents:
         st.error("No documents were successfully loaded. Stopping vector store build.")
@@ -72,7 +66,6 @@ def build_vector_store():
     if not texts:
         st.warning("Documents loaded but splitting resulted in zero chunks. Documents may be too small or empty.")
         return None
-
 
     # 3. Embeddings model
     embeddings = HuggingFaceEmbeddings(
@@ -103,7 +96,6 @@ def get_vector_store():
                 persist_directory=PERSIST_DIR,
                 embedding_function=embeddings
             )
-            # Check if the collection is not empty
             if vector_store._collection.count() > 0:
                 st.success("Vector store loaded successfully from disk.")
                 return vector_store
@@ -111,13 +103,12 @@ def get_vector_store():
                 st.warning("Existing vector store was empty. Rebuilding...")
                 return build_vector_store()
         except Exception:
-            # If loading fails (e.g., corruption), rebuild
             st.error("Error loading existing vector store. Rebuilding...")
             return build_vector_store()
     else:
         return build_vector_store()
 
-# --- HR Agent Logic (Integrated within app.py) ---
+# --- HR Agent Logic (Manual RAG/Chat Handler) ---
 
 class HRAgent:
     def __init__(self):
@@ -151,23 +142,21 @@ class HRAgent:
             api_key=gemini_api_key_value
         )
 
-        # 3. Memory for chat history
-        self.memory = ConversationBufferMemory(
-            memory_key="chat_history",
-            return_messages=True
-        )
-
-        # 4. Retrieval-augmented chain setup
-        self.chain = ConversationalRetrievalChain.from_llm(
-            llm=self.llm,
-            retriever=self.retriever,
-            memory=self.memory,
-            return_source_documents=True,
-            output_key='answer' # Explicitly setting output key
+        # 3. Define RAG Prompt Template
+        self.rag_prompt = PromptTemplate(
+            template=(
+                "You are an HR Policy Assistant. Use the following policy documents and chat history "
+                "to answer the user's question clearly and concisely. Only use the provided context. "
+                "If the information is not in the context, state that you cannot find the answer in the policies.\n\n"
+                "Chat History: {chat_history}\n"
+                "Context: {context}\n\n"
+                "Question: {question}"
+            ),
+            input_variables=["chat_history", "context", "question"]
         )
 
     def get_response(self, query: str):
-        """Processes a user query and returns the AI response and source documents."""
+        """Processes a user query using manual RAG and returns the response and sources."""
         
         # --- High-Risk Keyword Filtering ---
         high_risk_keywords = ["harassment", "discrimination", "lawsuit", "legal action", "termination", "formal complaint"]
@@ -182,11 +171,30 @@ class HRAgent:
             }
         
         try:
-            result = self.chain.invoke({"question": query})
-            answer = result.get("answer", "I couldn't find an answer in the policy documents.")
+            # 1. Retrieval Step: Get relevant documents
+            retrieved_docs = self.retriever.invoke(query)
+            context = "\n---\n".join([doc.page_content for doc in retrieved_docs])
             
+            # 2. History Step: Format chat history for the prompt
+            # We map session messages to a simple string format for the prompt
+            chat_history_str = "\n".join(
+                [f"{msg['role'].capitalize()}: {msg['content']}" for msg in st.session_state.messages]
+            )
+            
+            # 3. Formatting Prompt
+            prompt_text = self.rag_prompt.format(
+                chat_history=chat_history_str,
+                context=context,
+                question=query
+            )
+            
+            # 4. Generation Step: Invoke LLM
+            response = self.llm.invoke(prompt_text)
+            answer = response.content
+
+            # 5. Source Extraction
             sources = []
-            for doc in result.get("source_documents", []):
+            for doc in retrieved_docs:
                 meta = doc.metadata.get("source")
                 if meta:
                     # Extracts just the filename (e.g., 'Sick_Leave_Policy.txt')
@@ -199,7 +207,7 @@ class HRAgent:
             }
 
         except Exception as e:
-            st.error(f"Error during chain invocation: {e}")
+            st.error(f"Error during manual RAG invocation: {e}")
             return {
                 "answer": f"⚠️ An internal error occurred while processing your request. Please check the console logs.",
                 "sources": []
@@ -227,6 +235,7 @@ st.title("🤖 HR Policy Assistant")
 st.caption("Policy information is powered by the Gemini 2.5 Flash RAG chain.")
 st.subheader("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
 
+# Load the agent, which handles initialization and vector store checks
 agent = load_hr_agent() 
 
 # Initialize chat history
@@ -241,6 +250,7 @@ for message in st.session_state.messages:
 # React to user input
 if prompt := st.chat_input("Enter your question about HR policies..."):
     # 1. User message
+    # Add user message to history before processing for the RAG chain's context
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
         st.markdown(prompt)
