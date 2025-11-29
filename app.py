@@ -1,122 +1,65 @@
 import streamlit as st
 from hr_agent import HRAgent
-from typing import List
 
-# Set page config
-st.set_page_config(
-    page_title="🤖 HR Policy Assistant",
-    page_icon="💼",
-    layout="centered"
-)
-
-# High-risk keywords for escalation
-HIGH_RISK_KEYWORDS = [
-    "formal complaint",
-    "harassment",
-    "legal action",
-    "termination",
-    "discrimination"
-]
-
-# Escalation message
-ESCALATION_MESSAGE = """
-**⚠️ Sensitive Query Detected**
-Your message contains keywords that require direct human attention.
-
-Please contact a human HR representative:
-📧 HR-Support@company.com  
-📞 Extension: 555
-"""
-
-def contains_high_risk_keywords(text: str) -> bool:
-    """Check if the text contains any high-risk keywords."""
-    text_lower = text.lower()
-    return any(k in text_lower for k in HIGH_RISK_KEYWORDS)
-
-# Cached HR Agent initialization
+# --- Force Caching Fix/LLM Initialization ---
+# Use st.cache_resource for the agent instance to prevent re-initialization on every rerun
 @st.cache_resource
-def get_hr_agent():
-    """
-    Safely initialize the HR Agent.
-    Uses st.cache_resource to ensure the heavy loading (vector store)
-    only happens once.
-    """
+def load_hr_agent():
+    """Loads and initializes the HR Agent once."""
     try:
-        agent = HRAgent()
-        return agent
+        return HRAgent()
+    except ValueError as e:
+        st.error(f"Initialization Error: {e}")
+        st.stop()
     except Exception as e:
-        # Refined error message to guide user on the confirmed setup
-        st.error(f"❌ HR Agent failed to initialize: {e}")
-        st.info("Please check:\n- Streamlit Secret `GEMINI_API_KEY` (for the LLM)\n- The `chroma_db` was built and loaded using **HuggingFace Embeddings**\n- Folder `HR_Policy_Docs/` contains valid files")
-        return None
+        st.error(f"An unexpected error occurred during setup: {e}")
+        st.stop()
 
-def main():
-    st.title("🤖 HR Policy Assistant")
-    st.write("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
-    st.divider()
 
-    # Initialize session chat history
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# --- Streamlit UI Setup ---
+# ***Cosmetic change to trigger full cache refresh***
+st.title("🤖 HR Policy Assistant (Live Version)")
 
-    # Display past messages
-    for msg in st.session_state.messages:
-        with st.chat_message(msg["role"]):
-            st.markdown(msg["content"])
-            if msg.get("sources"):
-                with st.expander("Sources"):
-                    for s in msg["sources"]:
-                        st.write(f"- {s}")
+st.subheader("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
 
-    # Chat input box
-    if prompt := st.chat_input("Type your question…"):
+# Load the agent (will only run once due to st.cache_resource)
+agent = load_hr_agent()
 
-        # Record user message and display it immediately
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+# Initialize chat history
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-        # Step 1: High-risk keyword detection
-        if contains_high_risk_keywords(prompt):
-            response = ESCALATION_MESSAGE
-            sources = []
+# Display chat messages from history on app rerun
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-        else:
-            # Step 2: Load HR Agent
-            with st.spinner("Thinking…"):
-                hr_agent = get_hr_agent()
+# React to user input
+if prompt := st.chat_input("Enter your question about HR policies..."):
+    # Add user message to chat history
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    # Display user message in chat message container
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-                if hr_agent is None:
-                    response = (
-                        "⚠️ HR Assistant couldn't start.\n\n"
-                        "Please check:\n"
-                        "- `GEMINI_API_KEY` (for the LLM)\n"
-                        "- `chroma_db` and `HR_Policy_Docs/` folder"
-                    )
-                    sources = []
-
-                else:
-                    result = hr_agent.get_response(prompt)
-
-                    # Get data from the dictionary returned by hr_agent.py
-                    response = result.get("answer", "No response available.")
-                    sources = result.get("sources", [])
-                    
-        # Show assistant message
-        with st.chat_message("assistant"):
-            st.markdown(response)
+    # Get the AI response
+    with st.chat_message("assistant"):
+        with st.spinner("Searching policies and generating response..."):
+            
+            # Get the response from the HR agent
+            response_data = agent.get_response(prompt)
+            
+            answer = response_data["answer"]
+            sources = response_data["sources"]
+            
+            # Format the answer with sources
+            full_response = answer
             if sources:
-                with st.expander("Sources"):
-                    # Use a set to display only unique source file names
-                    for s in list(set(sources)): 
-                        st.write(f"- {s}")
-
-        # Save assistant message in history
-        st.session_state.messages.append({
-            "role": "assistant",
-            "content": response,
-            "sources": sources
-        })
-
-if __name__ == "__main__":
-    main()
+                full_response += "\n\n---\n\n**Sources Used:**\n" + "\n".join(
+                    [f"- `{source}`" for source in sources]
+                )
+            
+            st.markdown(full_response)
+    
+    # Add assistant response to chat history
+    st.session_state.messages.append({"role": "assistant", "content": full_response})
