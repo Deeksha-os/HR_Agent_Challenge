@@ -13,20 +13,18 @@ class HRAgent:
     def __init__(self):
         # 0. Get the API Key for the LLM using Streamlit's stable method
         try:
-            gemini_api_key = st.secrets["GEMINI_API_KEY"]
+            gemini_api_key_value = st.secrets["GEMINI_API_KEY"]
             
-            # CRITICAL FIX: Set the key as an environment variable immediately.
-            # This handles cases where LangChain or underlying libraries might look 
-            # for os.environ["GEMINI_API_KEY"] or os.environ["GOOGLE_API_KEY"] 
-            # during initialization, even if we pass it explicitly later.
-            os.environ["GEMINI_API_KEY"] = gemini_api_key
+            # CRITICAL FIX: The error indicates LangChain is specifically looking for GOOGLE_API_KEY 
+            # in the environment. We must set the value from our GEMINI_API_KEY secret 
+            # into the GOOGLE_API_KEY environment variable.
+            os.environ["GOOGLE_API_KEY"] = gemini_api_key_value
             
         except KeyError:
             # Raise an error to be caught by the app.py error handler
             raise ValueError("GEMINI_API_KEY not found in Streamlit secrets for LLM initialization.")
 
         # 1. Load vector store (ChromaDB)
-        # This relies on data_loader.py now also using HuggingFace embeddings
         self.vector_store = get_vector_store()
 
         if not self.vector_store:
@@ -42,12 +40,13 @@ class HRAgent:
         )
 
         # 2. Chat Model Initialization
-        # We still pass it explicitly for best practice, but now the environment variable
-        # is also set as a failsafe.
+        # Since we set the environment variable, the initialization should now succeed.
+        # We can omit the api_key parameter here as the environment variable is set.
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.3,
-            api_key=gemini_api_key 
+            # We rely on the os.environ setting above, but passing explicitly is still good practice:
+            api_key=gemini_api_key_value
         )
 
         # 3. Memory for chat history
@@ -94,4 +93,3 @@ class HRAgent:
 
 if __name__ == "__main__":
     print("This file should be run via Streamlit (app.py).")
-    
