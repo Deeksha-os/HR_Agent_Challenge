@@ -1,12 +1,22 @@
 streamlit==1.36.0
-langchain==0.2.12
-langchain-core==0.2.23
+
+# LangChain (stable versions)
+langchain==0.2.11
+langchain-core==0.2.26
 langchain-community==0.2.7
+
+# Gemini Integration
 langchain-google-genai==1.0.5
-chromadb==0.4.24
-sentence-transformers==2.7.0
+
+# Embeddings + Vector DB
+sentence-transformers==2.6.1
+chromadb==0.4.22
+
+# Loaders
 pypdf==4.2.0
-python-dotenv==1.0.1
-protobuf==5.29.0
 docx2txt==0.8
+
+# Utilities
+python-dotenv==1.0.1
+protobuf==5.28.3
 pydantic==2.8.2
