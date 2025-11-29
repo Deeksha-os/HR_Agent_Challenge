@@ -11,79 +11,117 @@ st.set_page_config(
 
 # High-risk keywords for escalation
 HIGH_RISK_KEYWORDS = [
-    'formal complaint', 
-    'harassment', 
-    'legal action', 
-    'termination', 
-    'discrimination'
+    "formal complaint",
+    "harassment",
+    "legal action",
+    "termination",
+    "discrimination"
 ]
 
 # Escalation message
 ESCALATION_MESSAGE = """
-**Your query contains sensitive keywords that require direct human attention.**
-\nPlease contact a human HR representative immediately at HR-Support@company.com or call extension 555.
+**⚠️ Sensitive Query Detected**
+Your message contains keywords that require direct human attention.
+
+Please contact a human HR representative:
+📧 HR-Support@company.com  
+📞 Extension: 555
 """
 
 def contains_high_risk_keywords(text: str) -> bool:
-    """Check if the text contains any high-risk keywords"""
+    """Check if the text contains any high-risk keywords."""
     text_lower = text.lower()
-    return any(keyword in text_lower for keyword in HIGH_RISK_KEYWORDS)
+    return any(k in text_lower for k in HIGH_RISK_KEYWORDS)
 
-# Use st.cache_resource to initialize the heavy HR Agent only once
+# Cached HR Agent initialization
 @st.cache_resource
 def get_hr_agent():
-    # This is where the HRAgent (and thus data_loader.py) is called
-    return HRAgent()
+    """
+    Safely initialize the HR Agent.
+    """
+    try:
+        agent = HRAgent()
+        return agent
+    except Exception as e:
+        st.error(f"❌ HR Agent failed to initialize: {e}")
+        st.info("Please check:\n- Streamlit Secrets `GEMINI_API_KEY`\n- Folder `HR_Policy_Docs/` contains valid files")
+        return None
 
 def main():
-    st.write("--- DEBUG: Streamlit is Running ---")
     st.title("🤖 HR Policy Assistant")
-    st.write("Ask me anything about company policies and HR-related questions.")
+    st.write("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
+    st.divider()
 
-    # Initialize chat history
+    # Initialize session chat history
     if "messages" not in st.session_state:
         st.session_state.messages = []
 
-    # Display chat messages
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
-            if "sources" in message and message["sources"]:
+    # Display past messages
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+            if msg.get("sources"):
                 with st.expander("Sources"):
-                    for source in message["sources"]:
-                        st.write(f"- {source}")
+                    for s in msg["sources"]:
+                        st.write(f"- {s}")
 
-    # Chat input
-    if prompt := st.chat_input("Type your question here..."):
-        # Add user message to chat history
+    # Chat input box
+    if prompt := st.chat_input("Type your question…"):
+
+        # Record user message
         st.session_state.messages.append({"role": "user", "content": prompt})
-        
-        # Display user message
+
+        # Show user message
         with st.chat_message("user"):
             st.markdown(prompt)
-        
-        # Check for high-risk keywords
+
+        # Step 1: High-risk keyword detection
         if contains_high_risk_keywords(prompt):
             response = ESCALATION_MESSAGE
             sources = []
+
         else:
-            # Get response from HR Agent (triggers the one-time initialization)
-            with st.spinner("Thinking..."):
-                # If get_hr_agent fails here, it throws the initialization error
+            # Step 2: Load HR Agent
+            with st.spinner("Thinking…"):
                 hr_agent = get_hr_agent()
-                result = hr_agent.get_response(prompt)
-                response = result["answer"]
-                sources = result.get("sources", [])
-        
-        # Display assistant response
+
+                if hr_agent is None:
+                    response = (
+                        "⚠️ HR Assistant couldn't start.\n\n"
+                        "Please check:\n"
+                        "- `GEMINI_API_KEY`\n"
+                        "- `HR_Policy_Docs/` folder"
+                    )
+                    sources = []
+
+                else:
+                    # 🔥 Correct function call — HRAgent.ask()
+                    result = hr_agent.ask(prompt)
+
+                    # The output from ConversationalRetrievalChain is:
+                    # { "answer": "...", "source_documents": [...] }
+                    if isinstance(result, dict):
+                        response = result.get("answer", "No response available.")
+                        source_docs = result.get("source_documents", [])
+                        
+                        sources = []
+                        for d in source_docs:
+                            src = d.metadata.get("source", "Unknown")
+                            sources.append(src)
+                    else:
+                        # Fallback: if the chain returns a string
+                        response = result
+                        sources = []
+
+        # Show assistant message
         with st.chat_message("assistant"):
             st.markdown(response)
             if sources:
                 with st.expander("Sources"):
-                    for source in sources:
-                        st.write(f"- {source}")
-        
-        # Add assistant response to chat history
+                    for s in sources:
+                        st.write(f"- {s}")
+
+        # Save assistant message in history
         st.session_state.messages.append({
             "role": "assistant",
             "content": response,
