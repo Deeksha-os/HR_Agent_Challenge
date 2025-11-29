@@ -7,43 +7,42 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import DirectoryLoader, Docx2txtLoader
+# CRITICAL FIX: Importing TextLoader to handle simple .txt files
+from langchain_community.document_loaders import DirectoryLoader, TextLoader 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
 # Load environment variables (for local testing via .env)
-# This handles the GOOGLE_API_KEY if running locally with a .env file.
 load_dotenv() 
 
-# CRITICAL CONSTANT: New persistence directory name to force a clean data rebuild on Streamlit Cloud
-PERSIST_DIR = "chroma_db_final_single_v2" 
+# CRITICAL CONSTANT: Renamed persistence directory to force a clean data rebuild on Streamlit Cloud
+PERSIST_DIR = "chroma_db_final_txt_loader_v3" 
 
 # --- Data Loading and Vector Store Logic (Integrated) ---
 
 def build_vector_store():
     """
     Builds and persists the Chroma vector store from documents in HR_Policy_Docs.
-    Requires documents to have the .docx extension.
+    Correctly uses TextLoader and looks for files with the .txt extension.
     """
     
     # 1. Load documents 
-    # Must use Docx2txtLoader and look for .docx files, matching the expected input.
     loader = DirectoryLoader(
         'HR_Policy_Docs',
-        glob="**/*.docx",
-        loader_cls=Docx2txtLoader,
+        glob="**/*.txt", # CORRECT: Looking for .txt files
+        loader_cls=TextLoader, # CORRECT: Using TextLoader for .txt files
         recursive=True
     )
     try:
         documents = loader.load()
     except Exception as e:
-        # User feedback for common document error
-        st.error("Document Loading Error: Please ensure all policy files in 'HR_Policy_Docs' have the **.docx** extension.")
+        # User feedback for document errors
+        st.error("Document Loading Error: Please ensure all policy files in 'HR_Policy_Docs' have the **.txt** extension.")
         print(f"Error loading documents: {e}")
         return None
         
     if not documents:
-        st.warning("No .docx documents found in HR_Policy_Docs. Cannot build vector store.")
+        st.warning("No .txt documents found in HR_Policy_Docs. Cannot build vector store. Check your file names.")
         return None
 
     # 2. Split documents
@@ -54,7 +53,6 @@ def build_vector_store():
     texts = text_splitter.split_documents(documents)
 
     # 3. Embeddings model
-    # Using a common, efficient Sentence Transformer model
     embeddings = HuggingFaceEmbeddings(
         model_name="all-MiniLM-L6-v2",
         model_kwargs={'device': 'cpu'} # Use CPU for maximum compatibility
@@ -83,18 +81,14 @@ def get_vector_store():
                 persist_directory=PERSIST_DIR,
                 embedding_function=embeddings
             )
-            # Check if the collection is non-empty
             if vector_store._collection.count() > 0:
                 print("Vector store loaded successfully from disk.")
                 return vector_store
             else:
-                # If directory exists but is empty/corrupted, rebuild
                 return build_vector_store()
         except Exception:
-            # If loading fails for any reason, rebuild
             return build_vector_store()
     else:
-        # If directory doesn't exist, build from scratch
         return build_vector_store()
 
 # --- HR Agent Logic (Integrated) ---
@@ -106,7 +100,7 @@ class HRAgent:
         try:
             # 1. Try Streamlit secrets (for cloud deployment)
             gemini_api_key_value = st.secrets["GEMINI_API_KEY"]
-            os.environ["GOOGLE_API_KEY"] = gemini_api_key_value # Set for LangChain
+            os.environ["GOOGLE_API_KEY"] = gemini_api_key_value 
         except KeyError:
              # 2. Try OS environment (for local testing via .env file)
              gemini_api_key_value = os.getenv("GOOGLE_API_KEY")
@@ -119,7 +113,7 @@ class HRAgent:
 
         if not self.vector_store:
             raise ValueError(
-                "Vector store failed to load. Check HR_Policy_Docs and file extensions (.docx)."
+                "Vector store failed to load. Check HR_Policy_Docs and ensure files are **.txt**."
             )
 
         self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 3}) 
@@ -143,7 +137,7 @@ class HRAgent:
             retriever=self.retriever,
             memory=self.memory,
             return_source_documents=True,
-            output_key='answer' # FIX: This explicitly names the output key to resolve the runtime error.
+            output_key='answer' 
         )
 
     def get_response(self, query: str):
@@ -172,7 +166,7 @@ class HRAgent:
             for doc in result.get("source_documents", []):
                 meta = doc.metadata.get("source")
                 if meta:
-                    # Extracts just the filename (e.g., 'Sick_Leave_Policy.docx')
+                    # Extracts just the filename (e.g., 'Sick_Leave_Policy.txt')
                     filename = os.path.basename(meta)
                     sources.append(filename)
 
@@ -184,13 +178,12 @@ class HRAgent:
         except Exception as e:
             print(f"Error during chain invocation: {e}")
             return {
-                "answer": f"⚠️ An internal error occurred while processing your request: {e}",
+                "answer": f"⚠️ An internal error occurred while processing your request. Please check the console logs.",
                 "sources": []
             }
 
 # --- Streamlit Main App Execution ---
 
-# Use st.cache_resource to ensure the expensive RAG setup runs only once
 @st.cache_resource(show_spinner="Initializing HR Agent and loading Vector Store...")
 def load_hr_agent():
     """Loads and initializes the HR Agent once."""
@@ -210,7 +203,6 @@ st.title("🤖 HR Policy Assistant")
 st.caption("Policy information is powered by the Gemini 2.5 Flash RAG chain.")
 st.subheader("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
 
-# Load the agent (will only run once)
 agent = load_hr_agent()
 
 # Initialize chat history
