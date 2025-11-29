@@ -24,7 +24,7 @@ ESCALATION_MESSAGE = """
 Your message contains keywords that require direct human attention.
 
 Please contact a human HR representative:
-📧 HR-Support@company.com  
+📧 HR-Support@company.com  
 📞 Extension: 555
 """
 
@@ -45,9 +45,9 @@ def get_hr_agent():
         agent = HRAgent()
         return agent
     except Exception as e:
+        # Refined error message to guide user on the confirmed setup
         st.error(f"❌ HR Agent failed to initialize: {e}")
-        st.info("Please check:\n- Streamlit Secrets `GEMINI_API_KEY`\n- Folder `HR_Policy_Docs/` contains valid files")
-        # Return None so the rest of the app knows the agent is not ready
+        st.info("Please check:\n- Streamlit Secret `GEMINI_API_KEY` (for the LLM)\n- The `chroma_db` was built and loaded using **HuggingFace Embeddings**\n- Folder `HR_Policy_Docs/` contains valid files")
         return None
 
 def main():
@@ -90,13 +90,12 @@ def main():
                     response = (
                         "⚠️ HR Assistant couldn't start.\n\n"
                         "Please check:\n"
-                        "- `GEMINI_API_KEY`\n"
-                        "- `HR_Policy_Docs/` folder"
+                        "- `GEMINI_API_KEY` (for the LLM)\n"
+                        "- `chroma_db` and `HR_Policy_Docs/` folder"
                     )
                     sources = []
 
                 else:
-                    # 🔥 CORRECT FUNCTION CALL: hr_agent.get_response(prompt)
                     result = hr_agent.get_response(prompt)
 
                     # Get data from the dictionary returned by hr_agent.py

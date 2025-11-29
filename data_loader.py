@@ -1,15 +1,14 @@
 import os
 from typing import List
-import streamlit as st # Import streamlit to access secrets
-
 from langchain_community.document_loaders import PyPDFLoader, Docx2txtLoader, TextLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from langchain_text_splitters import RecursiveCharacterTextSplitter 
 from langchain_community.vectorstores import Chroma
-from langchain_google_genai import GoogleGenerativeAIEmbeddings
+from langchain_community.embeddings import HuggingFaceEmbeddings # CORRECT: Used to load HF DB
 from langchain_core.documents import Document
 
-# IMPORTANT: Updated to match your real folder name
 DATA_PATH = "HR_Policy_Docs"
+# Must match the model used in your ingest.py
+EMBEDDING_MODEL_NAME = "sentence-transformers/all-MiniLM-L6-v2" 
 
 def load_documents(data_path: str = DATA_PATH) -> List[Document]:
     """Loads PDF, DOCX, TXT files from HR_Policy_Docs."""
@@ -23,14 +22,13 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
         file_path = os.path.join(data_path, file_name)
         loader = None
 
-        if file_name.endswith(".pdf"):
+        if file_name.endswith(".txt"):
+            loader = TextLoader(file_path)
+        elif file_name.endswith(".pdf"):
             loader = PyPDFLoader(file_path)
         elif file_name.endswith((".docx", ".doc")):
-            # Assuming you have the required dependency for docx (e.g., docx2txt)
             loader = Docx2txtLoader(file_path)
-        elif file_name.endswith(".txt"):
-            loader = TextLoader(file_path)
-
+        
         if loader:
             try:
                 documents.extend(loader.load())
@@ -39,7 +37,7 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
                 print(f"[ERROR] Cannot load {file_name}: {e}")
 
     if not documents:
-        print("[WARNING] No valid documents found in HR_Policy_Docs.")
+        print("[WARNING] No valid documents found in HR_Policy_Docs. Returning placeholder.")
         documents.append(Document(
             page_content="No HR files found. Please upload your company policies.",
             metadata={"source": "system_default"}
@@ -49,60 +47,43 @@ def load_documents(data_path: str = DATA_PATH) -> List[Document]:
 
 
 def get_vector_store():
-    """Creates or loads a Chroma vector database."""
+    """Creates or loads a Chroma vector database using HuggingFace Embeddings."""
     
-    # === CRITICAL FIX START ===
-    # 1. Access the API key directly from Streamlit secrets
-    try:
-        gemini_api_key = st.secrets["GEMINI_API_KEY"]
-    except KeyError:
-        # This will be caught by the HRAgent initialization error handler in app.py
-        print("[ERROR] GEMINI_API_KEY not found in Streamlit secrets.")
-        return None
-
-    # 2. Initialize Embeddings using the key
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/embedding-001", 
-        api_key=gemini_api_key # Pass the key explicitly
+    # Initialize HuggingFace Embeddings (Must match ingest.py)
+    print(f"[INFO] Initializing HuggingFace Embeddings: {EMBEDDING_MODEL_NAME}")
+    embeddings = HuggingFaceEmbeddings(
+        model_name=EMBEDDING_MODEL_NAME,
+        model_kwargs={"device": "cpu"} # Force CPU for cloud stability
     )
-    # === CRITICAL FIX END ===
-    
-    documents = load_documents()
-
-    if not documents:
-        print("[ERROR] No documents found. Vector store not created.")
-        return None
-
-    # Split text into chunks
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-    texts = text_splitter.split_documents(documents)
-
-    # Note: We removed the os.environ.get check since we are using st.secrets now
 
     persist_directory = os.path.join(os.getcwd(), "chroma_db")
 
-    # Use existing DB if available
+    # Use existing DB if available (Expected path for deployment)
     if os.path.exists(persist_directory):
         print("[INFO] Loading existing Chroma vector store...")
-        return Chroma(
-            persist_directory=persist_directory,
-            embedding_function=embeddings
+        try:
+            return Chroma(
+                persist_directory=persist_directory,
+                embedding_function=embeddings # CRITICAL: Loads with correct HF embedding function
+            )
+        except Exception as e:
+            print(f"[CRITICAL ERROR] Failed to load Chroma DB: {e}. Check if embeddings match.")
+            return None
+    else:
+        # Fallback: Create new DB if no persisted directory is found
+        print("[WARNING] Chroma DB directory not found. Attempting to create a new one...")
+        documents = load_documents()
+        if not documents:
+            return None
+            
+        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+        texts = text_splitter.split_documents(documents)
+        
+        vector_store = Chroma.from_documents(
+            documents=texts,
+            embedding=embeddings,
+            persist_directory=persist_directory
         )
-
-    # Create new DB
-    print("[INFO] Creating new Chroma vector store...")
-    vector_store = Chroma.from_documents(
-        documents=texts,
-        embedding=embeddings,
-        persist_directory=persist_directory
-    )
-    vector_store.persist()
-    print("[INFO] Vector store created.")
-
-    return vector_store
-
-
-if __name__ == "__main__":
-    # Note: Cannot run directly if st.secrets is used outside of a Streamlit environment
-    print("This file should be run via Streamlit (app.py).")
-    # For local testing without Streamlit, you would need to set the os.environ['GEMINI_API_KEY'] manually here.
+        vector_store.persist()
+        print("[INFO] New vector store created.")
+        return vector_store
