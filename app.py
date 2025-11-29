@@ -7,7 +7,6 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.vectorstores import Chroma
-# CRITICAL FIX: Importing TextLoader to handle simple .txt files
 from langchain_community.document_loaders import DirectoryLoader, TextLoader 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
@@ -15,34 +14,37 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 # Load environment variables (for local testing via .env)
 load_dotenv() 
 
-# CRITICAL CONSTANT: Renamed persistence directory to force a clean data rebuild on Streamlit Cloud
-PERSIST_DIR = "chroma_db_final_txt_loader_v3" 
+# CRITICAL CONSTANT: Renamed persistence directory to force a clean data rebuild
+PERSIST_DIR = "chroma_db_final_txt_loader_v7" 
 
 # --- Data Loading and Vector Store Logic (Integrated) ---
 
 def build_vector_store():
     """
     Builds and persists the Chroma vector store from documents in HR_Policy_Docs.
-    Correctly uses TextLoader and looks for files with the .txt extension.
+    Correctly uses TextLoader, looks for .txt files, and forces UTF-8 encoding.
     """
+    st.info("No existing vector store found or it was invalid. Building new vector store...")
     
     # 1. Load documents 
+    # CRITICAL FIX: Explicitly setting encoding='utf-8' to prevent decoding errors
     loader = DirectoryLoader(
         'HR_Policy_Docs',
-        glob="**/*.txt", # CORRECT: Looking for .txt files
-        loader_cls=TextLoader, # CORRECT: Using TextLoader for .txt files
-        recursive=True
+        glob="**/*.txt", 
+        loader_cls=TextLoader, 
+        recursive=True,
+        loader_kwargs={'encoding': 'utf-8'} # <-- THIS IS THE CRITICAL FIX
     )
+    
+    documents = []
     try:
         documents = loader.load()
     except Exception as e:
-        # User feedback for document errors
-        st.error("Document Loading Error: Please ensure all policy files in 'HR_Policy_Docs' have the **.txt** extension.")
-        print(f"Error loading documents: {e}")
+        st.error(f"Document Loading Error: Failed to load documents from 'HR_Policy_Docs'. Please check that your .txt files exist and are not empty. Details: {e}")
         return None
         
     if not documents:
-        st.warning("No .txt documents found in HR_Policy_Docs. Cannot build vector store. Check your file names.")
+        st.warning("No valid .txt documents found in HR_Policy_Docs. Cannot build vector store.")
         return None
 
     # 2. Split documents
@@ -51,11 +53,16 @@ def build_vector_store():
         chunk_overlap=200
     )
     texts = text_splitter.split_documents(documents)
+    
+    if not texts:
+        st.warning("Documents loaded but splitting resulted in zero chunks. Documents may be too small or empty.")
+        return None
+
 
     # 3. Embeddings model
     embeddings = HuggingFaceEmbeddings(
         model_name="all-MiniLM-L6-v2",
-        model_kwargs={'device': 'cpu'} # Use CPU for maximum compatibility
+        model_kwargs={'device': 'cpu'} 
     )
 
     # 4. Create and persist vector store
@@ -65,7 +72,7 @@ def build_vector_store():
         persist_directory=PERSIST_DIR
     )
     vector_store.persist()
-    print(f"Vector store built and persisted to {PERSIST_DIR}")
+    st.success(f"Successfully built vector store with {len(texts)} chunks.")
     return vector_store
 
 def get_vector_store():
@@ -81,41 +88,46 @@ def get_vector_store():
                 persist_directory=PERSIST_DIR,
                 embedding_function=embeddings
             )
+            # Check if the collection is not empty
             if vector_store._collection.count() > 0:
-                print("Vector store loaded successfully from disk.")
+                st.success("Vector store loaded successfully from disk.")
                 return vector_store
             else:
+                st.warning("Existing vector store was empty. Rebuilding...")
                 return build_vector_store()
         except Exception:
+            # If loading fails (e.g., corruption), rebuild
+            st.error("Error loading existing vector store. Rebuilding...")
             return build_vector_store()
     else:
         return build_vector_store()
 
-# --- HR Agent Logic (Integrated) ---
+# --- HR Agent Logic (Integrated within app.py) ---
 
 class HRAgent:
     def __init__(self):
-        # 0. API Key Retrieval: Checks Streamlit secrets first, then environment variables (local .env)
+        # 0. API Key Retrieval: 
         gemini_api_key_value = None
         try:
-            # 1. Try Streamlit secrets (for cloud deployment)
-            gemini_api_key_value = st.secrets["GEMINI_API_KEY"]
+            # Prefer Streamlit secrets or OS environment for safety
+            gemini_api_key_value = os.environ.get("GEMINI_API_KEY") or st.secrets["GEMINI_API_KEY"]
             os.environ["GOOGLE_API_KEY"] = gemini_api_key_value 
-        except KeyError:
-             # 2. Try OS environment (for local testing via .env file)
+        except Exception:
              gemini_api_key_value = os.getenv("GOOGLE_API_KEY")
 
         if not gemini_api_key_value:
-            raise ValueError("GEMINI_API_KEY / GOOGLE_API_KEY not found. Please set it in Streamlit secrets (Cloud) or in your local .env file (Local).")
+            raise ValueError("API Key not found. Please set GEMINI_API_KEY in Streamlit secrets or GOOGLE_API_KEY in your local .env file.")
 
         # 1. Load vector store
         self.vector_store = get_vector_store()
 
-        if not self.vector_store:
+        if not self.vector_store or self.vector_store._collection.count() == 0:
+            # This check ensures the app stops gracefully if policies could not be loaded
             raise ValueError(
-                "Vector store failed to load. Check HR_Policy_Docs and ensure files are **.txt**."
+                "Vector store is empty or failed to load. The app cannot function without policy documents. Check HR_Policy_Docs and confirm files have content."
             )
 
+        # Set search parameters
         self.retriever = self.vector_store.as_retriever(search_kwargs={"k": 3}) 
 
         # 2. Chat Model Initialization
@@ -131,13 +143,13 @@ class HRAgent:
             return_messages=True
         )
 
-        # 4. Retrieval-augmented chain setup with the critical fix
+        # 4. Retrieval-augmented chain setup
         self.chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.retriever,
             memory=self.memory,
             return_source_documents=True,
-            output_key='answer' 
+            output_key='answer' # Explicitly setting output key
         )
 
     def get_response(self, query: str):
@@ -156,13 +168,10 @@ class HRAgent:
             }
         
         try:
-            # Invoke the chain
             result = self.chain.invoke({"question": query})
             answer = result.get("answer", "I couldn't find an answer in the policy documents.")
             
             sources = []
-            
-            # Extract unique source filenames
             for doc in result.get("source_documents", []):
                 meta = doc.metadata.get("source")
                 if meta:
@@ -176,7 +185,7 @@ class HRAgent:
             }
 
         except Exception as e:
-            print(f"Error during chain invocation: {e}")
+            st.error(f"Error during chain invocation: {e}")
             return {
                 "answer": f"⚠️ An internal error occurred while processing your request. Please check the console logs.",
                 "sources": []
@@ -190,6 +199,7 @@ def load_hr_agent():
     try:
         return HRAgent()
     except ValueError as e:
+        # This catches errors from the __init__ if vector store or API key fail
         st.error(f"Initialization Error: {e}")
         st.stop()
     except Exception as e:
@@ -203,7 +213,7 @@ st.title("🤖 HR Policy Assistant")
 st.caption("Policy information is powered by the Gemini 2.5 Flash RAG chain.")
 st.subheader("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
 
-agent = load_hr_agent()
+agent = load_hr_agent() 
 
 # Initialize chat history
 if "messages" not in st.session_state:
@@ -229,7 +239,6 @@ if prompt := st.chat_input("Enter your question about HR policies..."):
             answer = response_data["answer"]
             sources = response_data["sources"]
             
-            # Format the answer with sources for clarity
             full_response = answer
             if sources:
                 source_list = "\n".join([f"- `{source}`" for source in sources])
