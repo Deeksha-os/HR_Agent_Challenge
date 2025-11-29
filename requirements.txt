@@ -7,6 +7,7 @@ langchain-community==0.2.7
 
 # Gemini Integration
 langchain-google-genai==1.0.5
+google-generativeai==0.5.4
 
 # Embeddings + Vector DB
 sentence-transformers==2.6.1
@@ -18,5 +19,5 @@ docx2txt==0.8
 
 # Utilities
 python-dotenv==1.0.1
-protobuf==5.28.3
+protobuf==4.25.3
 pydantic==2.8.2
