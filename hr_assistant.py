@@ -79,15 +79,19 @@ class HRAgent:
         # -----------------------------------
         
         try:
-            result = self.chain.invoke({"question": query})
+            result = self.chain({"question": query, "chat_history": self.memory.chat_memory.messages})
+            
+            # Extract answer and source documents
             answer = result.get("answer", "I couldn't find an answer in the policy documents.")
             
+            # Process source documents
             sources = []
-            
             for doc in result.get("source_documents", []):
                 meta = doc.metadata.get("source")
                 if meta:
-                    sources.append(meta)
+                    # Extract just the filename for cleaner display
+                    filename = os.path.basename(meta)
+                    sources.append(filename)
 
             return {
                 "answer": answer,
