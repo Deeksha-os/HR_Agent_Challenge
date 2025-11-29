@@ -8,10 +8,6 @@ from data_loader import get_vector_store
 class HRAgent:
     """
     Retrieval-Augmented Generation (RAG) HR Policy Assistant using Gemini Chat.
-    
-    This class handles the initialization of the vector store, the LLM, 
-    and the conversational chain, incorporating all necessary fixes for 
-    Streamlit deployment.
     """
 
     def __init__(self):
@@ -19,17 +15,13 @@ class HRAgent:
         try:
             gemini_api_key_value = st.secrets["GEMINI_API_KEY"]
             
-            # CRITICAL FIX 1: The LangChain/Google integration often expects 
-            # the API key to be set as GOOGLE_API_KEY in the environment. 
-            # We set the value from our Streamlit secret here as a failsafe.
+            # CRITICAL FIX 1: Set the value into the GOOGLE_API_KEY environment variable.
             os.environ["GOOGLE_API_KEY"] = gemini_api_key_value
             
         except KeyError:
-            # This error is caught by app.py to display a user-friendly message
             raise ValueError("GEMINI_API_KEY not found in Streamlit secrets for LLM initialization.")
 
         # 1. Load vector store (ChromaDB)
-        # Assumes data_loader.py correctly uses HuggingFaceEmbeddings to match ingest.py
         self.vector_store = get_vector_store()
 
         if not self.vector_store:
@@ -48,7 +40,6 @@ class HRAgent:
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.3,
-            # Pass the key explicitly as well, though the environment variable is the primary fix
             api_key=gemini_api_key_value
         )
 
@@ -59,15 +50,15 @@ class HRAgent:
         )
 
         # 4. Retrieval-augmented chain setup
-        # CRITICAL FIX 2: output_key='answer' resolves the "Got multiple output keys" error, 
-        # ensuring the conversation memory correctly stores the AI's final answer.
+        # --- CRITICAL FIX 2 ---
         self.chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.retriever,
             memory=self.memory,
             return_source_documents=True,
-            output_key='answer' 
+            output_key='answer' # <--- THIS MUST BE PRESENT!
         )
+        # ----------------------
 
     def get_response(self, query: str):
         """
@@ -75,15 +66,13 @@ class HRAgent:
         """
         
         # --- High-Risk Keyword Filtering ---
-        # This checks for sensitive topics before hitting the LLM or documents
         high_risk_keywords = ["harassment", "discrimination", "lawsuit", "legal action", "termination", "formal complaint"]
         if any(keyword in query.lower() for keyword in high_risk_keywords):
             return {
                 "answer": (
                     "🚨 **Policy Violation / High-Risk Inquiry Detected** 🚨\n\n"
                     "Your question involves a sensitive topic that requires immediate, confidential, and human intervention. "
-                    "I cannot provide advice on matters of **harassment, discrimination, legal action, or formal complaints**.\n\n"
-                    "**Please contact the HR Director directly at [HR_EMAIL@yourcompany.com] or call the confidential hotline at [XXX-XXX-XXXX].**"
+                    "Please contact the HR Director directly at [HR_EMAIL@yourcompany.com] or call the confidential hotline at [XXX-XXX-XXXX]."
                 ),
                 "sources": []
             }
@@ -95,7 +84,6 @@ class HRAgent:
             
             sources = []
             
-            # Extract unique source file names
             for doc in result.get("source_documents", []):
                 meta = doc.metadata.get("source")
                 if meta:
