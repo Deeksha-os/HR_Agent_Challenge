@@ -1,9 +1,13 @@
 import os
+from dotenv import load_dotenv
 import streamlit as st 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from data_loader import get_vector_store 
+
+# Load environment variables from .env file for Streamlit Cloud deployment
+load_dotenv() 
 
 class HRAgent:
     """
@@ -11,27 +15,27 @@ class HRAgent:
     """
 
     def __init__(self):
-        # 0. Get the API Key for the LLM using Streamlit's stable method
+        # 0. Get the API Key from Streamlit Secrets or environment variable
         try:
+            # Try Streamlit secrets first (for deployment)
             gemini_api_key_value = st.secrets["GEMINI_API_KEY"]
-            
-            # CRITICAL FIX 1: Set the value into the GOOGLE_API_KEY environment variable.
             os.environ["GOOGLE_API_KEY"] = gemini_api_key_value
-            
         except KeyError:
-            raise ValueError("GEMINI_API_KEY not found in Streamlit secrets for LLM initialization.")
+             # Fallback to local .env file (for local testing)
+             gemini_api_key_value = os.getenv("GOOGLE_API_KEY")
 
-        # 1. Load vector store (ChromaDB)
+        if not gemini_api_key_value:
+            raise ValueError("GEMINI_API_KEY / GOOGLE_API_KEY not found. Check Streamlit secrets or .env file.")
+
+        # 1. Load vector store (using the new name from data_loader.py)
         self.vector_store = get_vector_store()
 
         if not self.vector_store:
             raise ValueError(
-                "Vector store failed to load. Please verify:\n"
-                "1. The vector store was built and loaded with **HuggingFace Embeddings**.\n"
-                "2. The HR_Policy_Docs folder contains readable policy documents."
+                "Vector store failed to load. Please ensure HR_Policy_Docs folder is correct."
             )
 
-        # Retrieve documents from the vector store
+        # Retriever setup
         self.retriever = self.vector_store.as_retriever(
             search_kwargs={"k": 3} 
         )
@@ -50,20 +54,19 @@ class HRAgent:
         )
 
         # 4. Retrieval-augmented chain setup
-        # --- CRITICAL FIX 2 ---
+        # *** THIS IS THE CRITICAL FIX: output_key='answer' ***
+        # This tells the chain exactly which output key to use, fixing the error.
         self.chain = ConversationalRetrievalChain.from_llm(
             llm=self.llm,
             retriever=self.retriever,
             memory=self.memory,
             return_source_documents=True,
-            output_key='answer' # <--- THIS MUST BE PRESENT!
+            output_key='answer' 
         )
-        # ----------------------
+        # -------------------------------------------------------------------
 
     def get_response(self, query: str):
-        """
-        Processes a user query and returns the AI response and source documents.
-        """
+        """Processes a user query and returns the AI response and source documents."""
         
         # --- High-Risk Keyword Filtering ---
         high_risk_keywords = ["harassment", "discrimination", "lawsuit", "legal action", "termination", "formal complaint"]
@@ -76,26 +79,25 @@ class HRAgent:
                 ),
                 "sources": []
             }
-        # -----------------------------------
         
         try:
-            result = self.chain({"question": query, "chat_history": self.memory.chat_memory.messages})
-            
-            # Extract answer and source documents
+            # Use chain.invoke()
+            result = self.chain.invoke({"question": query})
             answer = result.get("answer", "I couldn't find an answer in the policy documents.")
             
-            # Process source documents
             sources = []
+            
+            # Extract and process source metadata
             for doc in result.get("source_documents", []):
                 meta = doc.metadata.get("source")
                 if meta:
-                    # Extract just the filename for cleaner display
+                    # Clean up the path to only show the filename
                     filename = os.path.basename(meta)
                     sources.append(filename)
 
             return {
                 "answer": answer,
-                "sources": list(set(sources)) 
+                "sources": list(set(sources)) # Remove duplicates
             }
 
         except Exception as e:
@@ -104,7 +106,3 @@ class HRAgent:
                 "answer": f"⚠️ An internal error occurred while processing your request: {e}",
                 "sources": []
             }
-
-
-if __name__ == "__main__":
-    print("This file should be run via Streamlit (app.py).")

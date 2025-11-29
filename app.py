@@ -1,14 +1,17 @@
 import streamlit as st
-# *** CRITICAL CHANGE: Importing from the new file name ***
-from hr_assistant import HRAgent 
+# Import the fixed agent file
+from hr_assistant import HRAgent
 
-# --- Force Caching Fix/LLM Initialization ---
-@st.cache_resource
+# --- Initialization and Caching ---
+# Use st.cache_resource to ensure the expensive RAG setup runs only once
+@st.cache_resource(show_spinner=True)
 def load_hr_agent():
     """Loads and initializes the HR Agent once."""
     try:
+        # The HRAgent initialization includes loading the LLM and the vector store
         return HRAgent()
     except ValueError as e:
+        # This catches errors like missing API key or failed vector store load
         st.error(f"Initialization Error: {e}")
         st.stop()
     except Exception as e:
@@ -17,11 +20,13 @@ def load_hr_agent():
 
 
 # --- Streamlit UI Setup ---
-st.title("🤖 HR Policy Assistant (Live Version)")
+st.set_page_config(page_title="HR Policy Assistant", layout="centered")
+
+st.title("🤖 HR Policy Assistant (Final Deployment)")
 
 st.subheader("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
 
-# Load the agent (will only run once due to st.cache_resource)
+# Load the agent (will only run once)
 agent = load_hr_agent()
 
 # Initialize chat history
@@ -31,17 +36,16 @@ if "messages" not in st.session_state:
 # Display chat messages from history on app rerun
 for message in st.session_state.messages:
     with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+        st.markdown(message["content"], unsafe_allow_html=True)
 
 # React to user input
 if prompt := st.chat_input("Enter your question about HR policies..."):
-    # Add user message to chat history
+    # 1. User message
     st.session_state.messages.append({"role": "user", "content": prompt})
-    # Display user message in chat message container
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # Get the AI response
+    # 2. Assistant response
     with st.chat_message("assistant"):
         with st.spinner("Searching policies and generating response..."):
             
@@ -51,14 +55,13 @@ if prompt := st.chat_input("Enter your question about HR policies..."):
             answer = response_data["answer"]
             sources = response_data["sources"]
             
-            # Format the answer with sources
+            # Format the answer with sources for clarity
             full_response = answer
             if sources:
-                full_response += "\n\n---\n\n**Sources Used:**\n" + "\n".join(
-                    [f"- `{source}`" for source in sources]
-                )
+                source_list = "\n".join([f"- `{source}`" for source in sources])
+                full_response += f"\n\n---\n\n**Sources Used:**\n{source_list}"
             
-            st.markdown(full_response)
+            st.markdown(full_response, unsafe_allow_html=True)
     
     # Add assistant response to chat history
     st.session_state.messages.append({"role": "assistant", "content": full_response})
