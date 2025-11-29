@@ -94,3 +94,4 @@ class HRAgent:
 
 if __name__ == "__main__":
     print("This file should be run via Streamlit (app.py).")
+    
