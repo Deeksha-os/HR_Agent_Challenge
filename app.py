@@ -7,7 +7,8 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import DirectoryLoader, TextLoader 
+# We will use TextLoader, but manually iterate over files instead of using DirectoryLoader for robustness
+from langchain_community.document_loaders import TextLoader 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.embeddings import HuggingFaceEmbeddings
 
@@ -15,37 +16,51 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 load_dotenv() 
 
 # CRITICAL CONSTANT: Renamed persistence directory to force a clean data rebuild
-PERSIST_DIR = "chroma_db_final_txt_loader_v7" 
+PERSIST_DIR = "chroma_db_final_txt_loader_v8" 
+POLICY_DIR = 'HR_Policy_Docs'
 
 # --- Data Loading and Vector Store Logic (Integrated) ---
 
 def build_vector_store():
     """
-    Builds and persists the Chroma vector store from documents in HR_Policy_Docs.
-    Correctly uses TextLoader, looks for .txt files, and forces UTF-8 encoding.
+    Builds and persists the Chroma vector store from documents in HR_Policy_Docs
+    by manually iterating and loading each file for maximum robustness.
     """
     st.info("No existing vector store found or it was invalid. Building new vector store...")
     
-    # 1. Load documents 
-    # CRITICAL FIX: Explicitly setting encoding='utf-8' to prevent decoding errors
-    loader = DirectoryLoader(
-        'HR_Policy_Docs',
-        glob="**/*.txt", 
-        loader_cls=TextLoader, 
-        recursive=True,
-        loader_kwargs={'encoding': 'utf-8'} # <-- THIS IS THE CRITICAL FIX
-    )
+    if not os.path.isdir(POLICY_DIR):
+        st.error(f"Configuration Error: Directory not found: {POLICY_DIR}")
+        return None
     
-    documents = []
-    try:
-        documents = loader.load()
-    except Exception as e:
-        st.error(f"Document Loading Error: Failed to load documents from 'HR_Policy_Docs'. Please check that your .txt files exist and are not empty. Details: {e}")
+    # 1. Manually identify and load documents one by one
+    policy_files = [
+        os.path.join(POLICY_DIR, f) 
+        for f in os.listdir(POLICY_DIR) 
+        if f.endswith('.txt')
+    ]
+    
+    if not policy_files:
+        st.warning(f"No .txt documents found in {POLICY_DIR}. Cannot build vector store.")
         return None
         
+    documents = []
+    
+    # Load each file explicitly
+    for file_path in policy_files:
+        try:
+            # Use TextLoader directly on the file path with explicit encoding
+            loader = TextLoader(file_path, encoding='utf-8')
+            documents.extend(loader.load())
+        except Exception as e:
+            # Report the error for the specific file that failed
+            st.error(f"CRITICAL DOCUMENT ERROR: Failed to load {file_path}. Details: {e}")
+            # Continue trying to load other files, but log the error
+            
     if not documents:
-        st.warning("No valid .txt documents found in HR_Policy_Docs. Cannot build vector store.")
+        st.error("No documents were successfully loaded. Stopping vector store build.")
         return None
+    
+    st.info(f"Successfully loaded {len(documents)} documents.")
 
     # 2. Split documents
     text_splitter = RecursiveCharacterTextSplitter(
@@ -109,7 +124,7 @@ class HRAgent:
         # 0. API Key Retrieval: 
         gemini_api_key_value = None
         try:
-            # Prefer Streamlit secrets or OS environment for safety
+            # Prefer Streamlit secrets or OS environment
             gemini_api_key_value = os.environ.get("GEMINI_API_KEY") or st.secrets["GEMINI_API_KEY"]
             os.environ["GOOGLE_API_KEY"] = gemini_api_key_value 
         except Exception:
@@ -122,7 +137,6 @@ class HRAgent:
         self.vector_store = get_vector_store()
 
         if not self.vector_store or self.vector_store._collection.count() == 0:
-            # This check ensures the app stops gracefully if policies could not be loaded
             raise ValueError(
                 "Vector store is empty or failed to load. The app cannot function without policy documents. Check HR_Policy_Docs and confirm files have content."
             )
