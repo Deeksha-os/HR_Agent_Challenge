@@ -58,11 +58,12 @@ def get_vector_store():
     text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
     texts = text_splitter.split_documents(documents)
 
-    # Check API key
+    # Check API key - THIS IS WHERE THE APP IS FAILING
     if not os.environ.get("GEMINI_API_KEY"):
         print("[ERROR] GEMINI_API_KEY not set. Cannot create embeddings.")
         return None
 
+    # Initialize Gemini Embeddings
     embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001")
 
     persist_directory = os.path.join(os.getcwd(), "chroma_db")
