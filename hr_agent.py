@@ -1,5 +1,5 @@
 import os
-import streamlit as st # Need for st.secrets
+import streamlit as st 
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain.chains import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
@@ -14,17 +14,25 @@ class HRAgent:
         # 0. Get the API Key for the LLM using Streamlit's stable method
         try:
             gemini_api_key = st.secrets["GEMINI_API_KEY"]
+            
+            # CRITICAL FIX: Set the key as an environment variable immediately.
+            # This handles cases where LangChain or underlying libraries might look 
+            # for os.environ["GEMINI_API_KEY"] or os.environ["GOOGLE_API_KEY"] 
+            # during initialization, even if we pass it explicitly later.
+            os.environ["GEMINI_API_KEY"] = gemini_api_key
+            
         except KeyError:
             # Raise an error to be caught by the app.py error handler
             raise ValueError("GEMINI_API_KEY not found in Streamlit secrets for LLM initialization.")
 
         # 1. Load vector store (ChromaDB)
+        # This relies on data_loader.py now also using HuggingFace embeddings
         self.vector_store = get_vector_store()
 
         if not self.vector_store:
             raise ValueError(
                 "Vector store failed to load. Please verify:\n"
-                "1. The vector store was built and loaded with **HuggingFace Embeddings** (matching your `ingest.py` and `data_loader.py`).\n"
+                "1. The vector store was built and loaded with **HuggingFace Embeddings**.\n"
                 "2. The HR_Policy_Docs folder contains readable policy documents."
             )
 
@@ -34,10 +42,12 @@ class HRAgent:
         )
 
         # 2. Chat Model Initialization
+        # We still pass it explicitly for best practice, but now the environment variable
+        # is also set as a failsafe.
         self.llm = ChatGoogleGenerativeAI(
             model="gemini-2.5-flash",
             temperature=0.3,
-            api_key=gemini_api_key # Pass the key explicitly to the LLM
+            api_key=gemini_api_key 
         )
 
         # 3. Memory for chat history
