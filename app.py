@@ -1,8 +1,8 @@
 import streamlit as st
-from hr_agent import HRAgent
+# *** CRITICAL CHANGE: Importing from the new file name ***
+from hr_assistant import HRAgent 
 
 # --- Force Caching Fix/LLM Initialization ---
-# Use st.cache_resource for the agent instance to prevent re-initialization on every rerun
 @st.cache_resource
 def load_hr_agent():
     """Loads and initializes the HR Agent once."""
@@ -17,7 +17,6 @@ def load_hr_agent():
 
 
 # --- Streamlit UI Setup ---
-# ***Cosmetic change to trigger full cache refresh***
 st.title("🤖 HR Policy Assistant (Live Version)")
 
 st.subheader("Ask me anything about HR policies, leave rules, benefits, or workplace guidance.")
