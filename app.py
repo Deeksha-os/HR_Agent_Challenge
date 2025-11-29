@@ -24,7 +24,7 @@ ESCALATION_MESSAGE = """
 Your message contains keywords that require direct human attention.
 
 Please contact a human HR representative:
-📧 HR-Support@company.com  
+📧 HR-Support@company.com  
 📞 Extension: 555
 """
 
@@ -38,6 +38,8 @@ def contains_high_risk_keywords(text: str) -> bool:
 def get_hr_agent():
     """
     Safely initialize the HR Agent.
+    Uses st.cache_resource to ensure the heavy loading (vector store)
+    only happens once.
     """
     try:
         agent = HRAgent()
@@ -45,6 +47,7 @@ def get_hr_agent():
     except Exception as e:
         st.error(f"❌ HR Agent failed to initialize: {e}")
         st.info("Please check:\n- Streamlit Secrets `GEMINI_API_KEY`\n- Folder `HR_Policy_Docs/` contains valid files")
+        # Return None so the rest of the app knows the agent is not ready
         return None
 
 def main():
@@ -68,10 +71,8 @@ def main():
     # Chat input box
     if prompt := st.chat_input("Type your question…"):
 
-        # Record user message
+        # Record user message and display it immediately
         st.session_state.messages.append({"role": "user", "content": prompt})
-
-        # Show user message
         with st.chat_message("user"):
             st.markdown(prompt)
 
@@ -95,30 +96,20 @@ def main():
                     sources = []
 
                 else:
-                    # 🔥 Correct function call — HRAgent.ask()
-                    result = hr_agent.ask(prompt)
+                    # 🔥 CORRECT FUNCTION CALL: hr_agent.get_response(prompt)
+                    result = hr_agent.get_response(prompt)
 
-                    # The output from ConversationalRetrievalChain is:
-                    # { "answer": "...", "source_documents": [...] }
-                    if isinstance(result, dict):
-                        response = result.get("answer", "No response available.")
-                        source_docs = result.get("source_documents", [])
-                        
-                        sources = []
-                        for d in source_docs:
-                            src = d.metadata.get("source", "Unknown")
-                            sources.append(src)
-                    else:
-                        # Fallback: if the chain returns a string
-                        response = result
-                        sources = []
-
+                    # Get data from the dictionary returned by hr_agent.py
+                    response = result.get("answer", "No response available.")
+                    sources = result.get("sources", [])
+                    
         # Show assistant message
         with st.chat_message("assistant"):
             st.markdown(response)
             if sources:
                 with st.expander("Sources"):
-                    for s in sources:
+                    # Use a set to display only unique source file names
+                    for s in list(set(sources)): 
                         st.write(f"- {s}")
 
         # Save assistant message in history
